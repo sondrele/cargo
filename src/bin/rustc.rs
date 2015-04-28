@@ -1,6 +1,8 @@
 use std::env;
 
 use std::path::Path;
+use std::process::Output;
+use std::sync::Arc;
 
 use cargo::ops;
 use cargo::ops::{ExecEngine, CommandPrototype, CompileOptions};
@@ -10,7 +12,7 @@ use cargo::util::important_paths::find_root_manifest_for_cwd;
 use cargo::util::{CliResult, CliError, Config};
 use cargo::util::{CargoResult, ProcessError, ProcessBuilder};
 
-#[derive(RustcDecodable)]
+#[derive(RustcDecodable, Debug)]
 struct Options {
     arg_pkgid: Option<String>,
     arg_opts: Option<Vec<String>>,
@@ -58,6 +60,28 @@ manually compile a package's dependencies and then compile the package against
 the artifacts just generated.
 ";
 
+struct RustcEngine {
+    args: Option<Vec<String>>,
+}
+
+impl ExecEngine for RustcEngine {
+    fn exec(&self, command: CommandPrototype) -> Result<(), ProcessError> {
+        append_rustc_opts(command, &self.args).exec()
+    }
+
+    fn exec_with_output(&self, command: CommandPrototype) -> Result<Output, ProcessError> {
+        append_rustc_opts(command, &self.args).exec_with_output()
+    }
+}
+
+fn append_rustc_opts(mut command: CommandPrototype, args: &Option<Vec<String>>) -> ProcessBuilder {
+    if let &Some(ref args) = args {
+        debug!("appending args to cmd; cmd={}; args={:?}", command, args);
+        command.args(&args);
+    }
+    command.into_process_builder()
+}
+
 fn get_package(root: &Path, config: &Config) -> CargoResult<Package> {
     let mut source = try!(PathSource::for_path(root.parent().unwrap(), &config));
     try!(source.update());
@@ -77,6 +101,8 @@ pub fn execute(options: Options, config: &Config) -> CliResult<Option<()>> {
         .map(|t| t.name().to_string())
         .collect();
 
+    let engine = RustcEngine { args: options.arg_opts };
+
     let opts = CompileOptions {
         config: config,
         jobs: options.flag_jobs,
@@ -84,14 +110,14 @@ pub fn execute(options: Options, config: &Config) -> CliResult<Option<()>> {
         features: &options.flag_features,
         no_default_features: options.flag_no_default_features,
         spec: options.arg_pkgid.as_ref().map(|s| &s[..]),
-        exec_engine: None,
+        exec_engine: Some(Arc::new(Box::new(engine))),
         mode: ops::CompileMode::Build,
         release: options.flag_release,
         filter: if bins.is_empty() {
             ops::CompileFilter::Everything
         } else {
             ops::CompileFilter::Only {
-                lib: true, bins: &bins, examples: &[], benches: &[], tests: &[]
+                lib: false, bins: &bins, examples: &[], benches: &[], tests: &[]
             }
         },
     };
