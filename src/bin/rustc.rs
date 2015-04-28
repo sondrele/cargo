@@ -96,6 +96,15 @@ pub fn execute(options: Options, config: &Config) -> CliResult<Option<()>> {
     let root = try!(find_root_manifest_for_cwd(options.flag_manifest_path));
 
     let package = try!(get_package(&root, &config));
+
+    let pkgid = package.package_id();
+    let spec = options.arg_pkgid.as_ref()
+        .map(|s| if s == pkgid.name() {
+            None
+        } else {
+            Some(&s[..])
+        }).unwrap();
+
     let bins: Vec<String> = package.targets().iter()
         .filter(|t| t.is_bin())
         .map(|t| t.name().to_string())
@@ -109,7 +118,7 @@ pub fn execute(options: Options, config: &Config) -> CliResult<Option<()>> {
         target: options.flag_target.as_ref().map(|t| &t[..]),
         features: &options.flag_features,
         no_default_features: options.flag_no_default_features,
-        spec: options.arg_pkgid.as_ref().map(|s| &s[..]),
+        spec: spec,
         exec_engine: Some(Arc::new(Box::new(engine))),
         mode: ops::CompileMode::Build,
         release: options.flag_release,
