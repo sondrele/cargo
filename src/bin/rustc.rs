@@ -58,12 +58,24 @@ manually compile a package's dependencies and then compile the package against
 the artifacts just generated.
 ";
 
+fn get_package(root: &Path, config: &Config) -> CargoResult<Package> {
+    let mut source = try!(PathSource::for_path(root.parent().unwrap(), &config));
+    try!(source.update());
+    source.root_package()
+}
+
 pub fn execute(options: Options, config: &Config) -> CliResult<Option<()>> {
     debug!("executing; cmd=cargo-rustc; args={:?}",
            env::args().collect::<Vec<_>>());
     config.shell().set_verbose(options.flag_verbose);
 
     let root = try!(find_root_manifest_for_cwd(options.flag_manifest_path));
+
+    let package = try!(get_package(&root, &config));
+    let bins: Vec<String> = package.targets().iter()
+        .filter(|t| t.is_bin())
+        .map(|t| t.name().to_string())
+        .collect();
 
     let opts = CompileOptions {
         config: config,
@@ -75,7 +87,13 @@ pub fn execute(options: Options, config: &Config) -> CliResult<Option<()>> {
         exec_engine: None,
         mode: ops::CompileMode::Build,
         release: options.flag_release,
-        filter: ops::CompileFilter::Everything,
+        filter: if bins.is_empty() {
+            ops::CompileFilter::Everything
+        } else {
+            ops::CompileFilter::Only {
+                lib: true, bins: &bins, examples: &[], benches: &[], tests: &[]
+            }
+        },
     };
 
     ops::compile(&root, &opts).map(|_| None).map_err(|err| {
