@@ -62,22 +62,30 @@ the artifacts just generated.
 
 struct RustcEngine {
     args: Option<Vec<String>>,
+    targets: Vec<String>,
 }
 
 impl ExecEngine for RustcEngine {
     fn exec(&self, command: CommandPrototype) -> Result<(), ProcessError> {
-        append_rustc_opts(command, &self.args).exec()
+        append_rustc_opts(command, &self.args, &self.targets).exec()
     }
 
     fn exec_with_output(&self, command: CommandPrototype) -> Result<Output, ProcessError> {
-        append_rustc_opts(command, &self.args).exec_with_output()
+        append_rustc_opts(command, &self.args, &self.targets).exec_with_output()
     }
 }
 
-fn append_rustc_opts(mut command: CommandPrototype, args: &Option<Vec<String>>) -> ProcessBuilder {
-    if let &Some(ref args) = args {
-        debug!("appending args to cmd; cmd={}; args={:?}", command, args);
-        command.args(&args);
+fn append_rustc_opts(mut command: CommandPrototype, args: &Option<Vec<String>>, targets: &Vec<String>) -> ProcessBuilder {
+    let name_matches = command.get_args().windows(2).find(|&args| {
+        args[0].to_str() == Some("--crate-name") &&
+        targets.iter().find(|&target| Some(target.as_ref()) == args[1].to_str()).is_some()
+    }).is_some();
+
+    if name_matches {
+        if let &Some(ref args) = args {
+            debug!("appending args to cmd; cmd={}; args={:?}", command, args);
+            command.args(&args);
+        }
     }
     command.into_process_builder()
 }
@@ -110,7 +118,10 @@ pub fn execute(options: Options, config: &Config) -> CliResult<Option<()>> {
         .map(|t| t.name().to_string())
         .collect();
 
-    let engine = RustcEngine { args: options.arg_opts };
+    let engine = RustcEngine {
+        args: options.arg_opts,
+        targets: bins.clone()
+    };
 
     let opts = CompileOptions {
         config: config,
